@@ -50,6 +50,13 @@
   .sname small { font-style:italic; }
   .counts { text-align:right; font-variant-numeric:tabular-nums; }
 
+  #spotsBox summary { list-style:none; cursor:pointer; }
+  #spotsBox summary::-webkit-details-marker { display:none; }
+  #spotsBox summary h2 { display:flex; align-items:center; gap:6px; }
+  #spotsBox summary h2::before { content:"▸"; font-size:11px; transition:transform .15s; }
+  #spotsBox[open] summary h2::before { transform:rotate(90deg); }
+  #spotsBox summary:focus-visible { outline:2px solid var(--fg); outline-offset:2px; border-radius:4px; }
+  @media (prefers-reduced-motion: reduce) { #spotsBox summary h2::before { transition:none; } }
   #spotList { list-style:none; padding:0; margin:0; }
   #spotList li { padding:6px 0; border-bottom:1px solid var(--border); cursor:pointer; }
   #spotList li small { color:var(--muted); }
@@ -121,8 +128,10 @@
       </div>
     </form>
 
-    <h2>My spots</h2>
-    <ul id="spotList"></ul>
+    <details id="spotsBox">
+      <summary><h2>My spots (<span id="spotsCount">0</span>)</h2></summary>
+      <ul id="spotList"></ul>
+    </details>
     <div class="row">
       <button id="exportBtn">Export JSON</button>
       <button id="importBtn">Import JSON</button>
@@ -138,10 +147,10 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="data/gbif_species.js?v=4"></script>
-<script src="app.js?v=5"></script>
+<script src="app.js?v=6"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="sync.js?v=5"></script>
+<script src="sync.js?v=6"></script>
 </body>
 </html>

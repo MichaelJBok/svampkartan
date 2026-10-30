@@ -221,6 +221,7 @@ function renderSpots() {
     list.appendChild(li);
   });
   $("mineCount").textContent = spots.length;
+  $("spotsCount").textContent = spots.length;
 }
 
 $("gbifCount").textContent = [...species.values()].reduce((n, s) => n + s.gbif.length, 0).toLocaleString("sv-SE");
@@ -228,6 +229,11 @@ $("showGbif").onchange = applyVisibility;
 $("showMine").onchange = applyVisibility;
 renderSpeciesList();
 applyVisibility();
+
+// The list of my spots starts collapsed; remember if it was opened.
+const SPOTS_OPEN_KEY = "svampkartan.spotsOpen";
+$("spotsBox").open = readJson(SPOTS_OPEN_KEY, false);
+$("spotsBox").addEventListener("toggle", () => writeJson(SPOTS_OPEN_KEY, $("spotsBox").open));
 
 // ---------- add-spot form ----------
 let draft = null;
