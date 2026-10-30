@@ -1,7 +1,7 @@
 // Offline support: keeps the app, its libraries, the GBIF data and the map tiles you have viewed on the
 // device, so Svampkartan opens and shows your area without signal. Your spots work offline through Firestore.
 // Bump VERSION whenever a file in SHELL changes, so devices fetch the new set.
-const VERSION = "v9";
+const VERSION = "v10";
 const SHELL_CACHE = `svampkartan-${VERSION}`;
 const TILE_CACHE = "svampkartan-tiles";
 const MAX_TILES = 4000;                    // roughly 60–100 MB of map images
@@ -22,7 +22,10 @@ const LIBRARY_HOSTS = new Set(["unpkg.com", "www.gstatic.com"]);
 const TILE_HOSTS = /(^|\.)tile\.openstreetmap\.org$|(^|\.)tile\.opentopomap\.org$|^server\.arcgisonline\.com$/;
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: "reload" skips the browser's own short-lived copy (GitHub Pages allows 10 minutes), so a fresh
+  // install never saves a page that still points at the previous version's files.
+  const fresh = SHELL.map((url) => new Request(url, { cache: "reload" }));
+  event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(fresh)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
@@ -49,7 +52,7 @@ async function page(req) {
   const cache = await caches.open(SHELL_CACHE);
   try {
     const res = await Promise.race([
-      fetch(req),
+      fetch(req.url, { cache: "no-cache" }), // always ask the server (a quick "not modified" when unchanged)
       new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), PAGE_TIMEOUT)),
     ]);
     if (res.ok) cache.put("./", res.clone());
