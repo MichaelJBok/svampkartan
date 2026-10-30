@@ -223,15 +223,83 @@ function updateDraftColor() {
   draftMarker.setStyle({ fillColor: id === "__other" ? "#7f7f7f" : colorOf(id) });
 }
 
-map.on("click", (e) => {
-  draft = { lat: e.latlng.lat, lon: e.latlng.lng };
-  draftMarker.setLatLng(e.latlng).addTo(map);
+function openForm(latlng) {
+  draft = { lat: latlng.lat, lon: latlng.lng };
+  draftMarker.setLatLng(latlng).addTo(map);
   $("form").hidden = false;
   $("fPos").value = `${draft.lat.toFixed(5)}, ${draft.lon.toFixed(5)}`;
   if (!$("fDate").value) $("fDate").value = isoDate(new Date());
   updateDraftColor();
   $("fSpecies").focus();
+}
+map.on("click", (e) => openForm(e.latlng));
+
+// ---------- my location ----------
+// Follows the device's GPS while tracking is on; browsers only allow this over HTTPS (or localhost).
+let myPos = null;
+let pendingAdd = false;
+const posAccuracy = L.circle([0, 0], { radius: 0, color: "#1a73e8", weight: 1, fillOpacity: 0.12, interactive: false });
+const posDot = L.circleMarker([0, 0], { radius: 7, fillColor: "#1a73e8", fillOpacity: 1, color: "#ffffff", weight: 3, pane: "mine", renderer: mineRenderer, interactive: false });
+
+const LocateControl = L.Control.extend({
+  options: { position: "topleft" },
+  onAdd() {
+    const btn = L.DomUtil.create("a", "leaflet-bar locate-btn");
+    btn.href = "#";
+    btn.title = "Show my location";
+    btn.setAttribute("role", "button");
+    btn.setAttribute("aria-label", "Show my location");
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4" stroke="currentColor" stroke-width="2"/></svg>`;
+    L.DomEvent.disableClickPropagation(btn);
+    L.DomEvent.on(btn, "click", (e) => { L.DomEvent.preventDefault(e); toggleTracking(); });
+    return btn;
+  },
 });
+const locateBtn = new LocateControl().addTo(map).getContainer();
+
+function startTracking(centerOnFix) {
+  locateBtn.classList.add("active", "waiting");
+  map.locate({ watch: true, enableHighAccuracy: true, setView: false, maximumAge: 10000, timeout: 20000 });
+  map.once("locationfound", (e) => { if (centerOnFix) map.setView(e.latlng, Math.max(map.getZoom(), 15)); });
+}
+function stopTracking() {
+  map.stopLocate();
+  locateBtn.classList.remove("active", "waiting");
+  map.removeLayer(posDot); map.removeLayer(posAccuracy);
+  myPos = null;
+}
+function toggleTracking() {
+  if (locateBtn.classList.contains("active")) {
+    if (myPos && !map.getBounds().contains(myPos.latlng)) map.setView(myPos.latlng, Math.max(map.getZoom(), 15));
+    else stopTracking();
+  } else {
+    startTracking(true);
+  }
+}
+
+map.on("locationfound", (e) => {
+  myPos = { latlng: e.latlng, accuracy: e.accuracy };
+  locateBtn.classList.remove("waiting");
+  posAccuracy.setLatLng(e.latlng).setRadius(e.accuracy).addTo(map);
+  posDot.setLatLng(e.latlng).addTo(map);
+  $("locStatus").textContent = `GPS accuracy ±${Math.round(e.accuracy)} m`;
+  if (pendingAdd) { pendingAdd = false; openForm(e.latlng); }
+});
+map.on("locationerror", (e) => {
+  const denied = e.code === 1;
+  stopTracking();
+  pendingAdd = false;
+  $("locStatus").textContent = denied
+    ? "Location is blocked. Allow location for this site in your browser settings, then try again."
+    : `Could not get your location (${e.message}). Try again outdoors or with better signal.`;
+});
+
+$("addHereBtn").onclick = () => {
+  if (myPos) return openForm(myPos.latlng);
+  pendingAdd = true;
+  $("locStatus").textContent = "Finding your location…";
+  startTracking(true);
+};
 $("fSpecies").onchange = updateDraftColor;
 
 function closeForm() {

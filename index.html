@@ -50,6 +50,12 @@
   .tag.mine { opacity:1; border:2px solid #1a1a1a; box-shadow:none; }
   .src { color:var(--muted); }
   .cluster { display:flex; align-items:center; justify-content:center; border-radius:50%; font:600 12px/1 -apple-system, system-ui, sans-serif; }
+  .locate-btn { display:flex !important; align-items:center; justify-content:center; width:34px; height:34px; background:#fff; color:#444; }
+  .locate-btn.active { color:#1a73e8; }
+  .locate-btn.waiting svg { animation:pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity:.3; } }
+  @media (prefers-reduced-motion: reduce) { .locate-btn.waiting svg { animation:none; } }
+  #locStatus:empty { display:none; }
   .leaflet-popup-content .row { margin-top:8px; }
   .leaflet-popup-content button { padding:4px 10px; }
 
@@ -63,7 +69,11 @@
 <div id="app">
   <aside id="side">
     <h1>Svampkartan</h1>
-    <p class="hint">Click the map to add a new spot.</p>
+    <p class="hint">Tap the map to add a spot, or add one where you are standing.</p>
+    <div class="row">
+      <button type="button" class="primary" id="addHereBtn">Add spot at my location</button>
+    </div>
+    <p class="hint" id="locStatus" aria-live="polite"></p>
 
     <h2>Sources</h2>
     <label class="toggle"><input type="checkbox" id="showGbif" checked><span class="mk gbif"></span>
