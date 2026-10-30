@@ -51,6 +51,19 @@ spots.forEach((s) => {
 spots.forEach((s) => ensureSpecies(s.speciesId, s.species));
 const saveSpots = () => writeJson(STORAGE_KEY, spots);
 
+// While signed in, sync.js sets `cloud` so every change also goes to the private online copy.
+let cloud = null;
+function addSpots(list) {
+  spots.push(...list);
+  saveSpots();
+  cloud?.save(list);
+}
+function removeSpot(id) {
+  spots = spots.filter((x) => x.id !== id);
+  saveSpots();
+  cloud?.remove(id);
+}
+
 function isoDate(d) { return d.toISOString().slice(0, 10); }
 
 // ---------- map ----------
@@ -190,7 +203,7 @@ function renderSpots() {
     el.querySelector(".del").onclick = (e) => {
       const row = e.target.parentElement;
       row.innerHTML = `<span>Delete this spot?</span><button class="yes danger">Delete</button><button class="no">Keep</button>`;
-      row.querySelector(".yes").onclick = () => { spots = spots.filter((x) => x.id !== s.id); saveSpots(); renderSpots(); renderSpeciesList(); };
+      row.querySelector(".yes").onclick = () => { removeSpot(s.id); renderSpots(); renderSpeciesList(); };
       row.querySelector(".no").onclick = () => m.closePopup();
     };
     m.bindPopup(el);
@@ -356,15 +369,15 @@ $("form").onsubmit = (e) => {
     ensureSpecies(id, existing ? existing.name : name);
   }
   name = species.get(id).name;
-  spots.push({
+  addSpots([{
     id: crypto.randomUUID(),
     lat: +draft.lat.toFixed(6), lon: +draft.lon.toFixed(6),
     speciesId: id, species: name,
     date: $("fDate").value,
     notes: $("fNotes").value.trim(),
     created: new Date().toISOString(),
-  });
-  saveSpots(); closeForm(); renderSpeciesList(); $("fSpecies").value = id; renderSpots();
+  }]);
+  closeForm(); renderSpeciesList(); $("fSpecies").value = id; renderSpots();
 };
 
 // ---------- export / import ----------
@@ -390,8 +403,8 @@ $("importFile").onchange = async (e) => {
       if (!s.speciesId) s.speciesId = [...species.values()].find((k) => s.species?.toLowerCase().startsWith(k.name.toLowerCase()))?.id || slug(s.species || "Okänd");
       ensureSpecies(s.speciesId, s.species);
     });
-    spots.push(...added);
-    saveSpots(); renderSpeciesList(); renderSpots();
+    addSpots(added);
+    renderSpeciesList(); renderSpots();
     $("importStatus").textContent = `Imported ${added.length} spot(s).`;
   } catch (err) {
     $("importStatus").textContent = `Could not import: ${err.message}`;
