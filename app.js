@@ -14,8 +14,9 @@ const DEFAULT_COLORS = {
   "svart-trumpetsvamp": "#4b3f72",
   "karljohan": "#8b5a2b",
   "blek-taggsvamp": "#2a9d8f",
+  "blomkalssvamp": "#d0459c",
 };
-const EXTRA_COLORS = ["#1f77b4", "#d62728", "#9467bd", "#17becf", "#e377c2", "#7f7f7f", "#bcbd22"];
+const EXTRA_COLORS = ["#1f77b4", "#d62728", "#9467bd", "#17becf", "#7f7f7f", "#bcbd22"];
 
 const gbifSpecies = window.GBIF_SPECIES || [];
 const species = new Map(); // id -> {id, name, scientific, gbif: records[]}
@@ -175,12 +176,14 @@ function renderSpots() {
   mineMarkers.clear();
   const list = $("spotList");
   list.innerHTML = "";
-  [...spots].sort((a, b) => b.date.localeCompare(a.date)).forEach((s) => {
+  // Newest first; spots without a date (e.g. imported from Google Maps) go last.
+  [...spots].sort((a, b) => (b.date || "").localeCompare(a.date || "")).forEach((s) => {
     const visible = !hiddenSpecies.has(s.speciesId);
     const m = L.circleMarker([s.lat, s.lon], { ...mineStyle(s.speciesId), pane: "mine", renderer: mineRenderer });
     const el = document.createElement("div");
     el.innerHTML = `<span class="tag mine" style="--c:${colorOf(s.speciesId)}"></span><b>${escapeHtml(s.species)}</b>
-      <br><span class="src">My record</span> · ${s.date}
+      <br><span class="src">My record</span> · ${s.date || "date unknown"}
+      ${s.source ? `<br><small>From ${escapeHtml(s.source)}</small>` : ""}
       ${s.notes ? `<br>${escapeHtml(s.notes)}` : ""}
       <div class="row confirm"><button class="del">Delete</button></div>`;
     // Inline confirmation: dialogs like confirm() are not available everywhere.
@@ -196,7 +199,7 @@ function renderSpots() {
 
     const li = document.createElement("li");
     li.innerHTML = `<span class="tag mine" style="--c:${colorOf(s.speciesId)}"></span>${escapeHtml(s.species)}
-      <br><small>${s.date}</small>`;
+      <br><small>${s.date || "date unknown"}</small>`;
     li.onclick = () => {
       if (hiddenSpecies.has(s.speciesId)) { hiddenSpecies.delete(s.speciesId); writeJson(HIDDEN_KEY, [...hiddenSpecies]); renderSpeciesList(); applyVisibility(); }
       map.setView([s.lat, s.lon], 14);

@@ -2,10 +2,12 @@
 
 Writes data/gbif_species.js, which the map loads as static seed data.
 Run again only if you want a fresh snapshot:  python3 scripts/fetch_gbif.py
+Fetch only some species and keep the rest of the file:  python3 scripts/fetch_gbif.py blomkalssvamp
 """
 import json
 import pathlib
 import subprocess
+import sys
 import urllib.parse
 
 # id, Swedish name, scientific name, GBIF backbone taxon key
@@ -15,6 +17,7 @@ SPECIES = [
     ("svart-trumpetsvamp", "Svart trumpetsvamp", "Craterellus cornucopioides", 2554662),
     ("karljohan", "Karljohan", "Boletus edulis", 5954958),
     ("blek-taggsvamp", "Blek taggsvamp", "Hydnum repandum", 2554716),
+    ("blomkalssvamp", "Blomkålssvamp", "Sparassis crispa", 2550247),
 ]
 PAGE = 300
 # GBIF stalls when paging past ~10,000 results, so year ranges are split until each is below this.
@@ -52,8 +55,21 @@ def year_slices(taxon_key, years=(FIRST_YEAR, LAST_YEAR)):
     return year_slices(taxon_key, (years[0], mid)) + year_slices(taxon_key, (mid + 1, years[1]))
 
 
+only = set(sys.argv[1:])
+unknown = only - {s[0] for s in SPECIES}
+if unknown:
+    sys.exit(f"Unknown species id(s): {', '.join(sorted(unknown))}")
+existing = {}
+if only and OUT.exists():
+    text = OUT.read_text()
+    existing = {s["id"]: s for s in json.loads(text[text.index("=") + 1:].rstrip().rstrip(";"))}
+
 result = []
 for sid, name, scientific, taxon_key in SPECIES:
+    if only and sid not in only:
+        if sid in existing:
+            result.append(existing[sid])
+        continue
     records = []
     for years in year_slices(taxon_key):
         offset = 0
