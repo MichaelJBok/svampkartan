@@ -224,6 +224,7 @@ function updateDraftColor() {
 }
 
 function openForm(latlng) {
+  setMenuHidden(false);
   draft = { lat: latlng.lat, lon: latlng.lng };
   draftMarker.setLatLng(latlng).addTo(map);
   $("form").hidden = false;
@@ -256,6 +257,34 @@ const LocateControl = L.Control.extend({
   },
 });
 const locateBtn = new LocateControl().addTo(map).getContainer();
+
+// ---------- hide / show the menu ----------
+const MENU_KEY = "svampkartan.menuHidden";
+const MENU_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`;
+const MenuControl = L.Control.extend({
+  options: { position: "topleft" },
+  onAdd() {
+    const btn = L.DomUtil.create("a", "leaflet-bar menu-btn");
+    btn.href = "#";
+    btn.setAttribute("role", "button");
+    btn.innerHTML = MENU_ICON;
+    L.DomEvent.disableClickPropagation(btn);
+    L.DomEvent.on(btn, "click", (e) => { L.DomEvent.preventDefault(e); setMenuHidden(!$("app").classList.contains("menu-hidden")); });
+    return btn;
+  },
+});
+const menuBtn = new MenuControl().addTo(map).getContainer();
+
+function setMenuHidden(hidden) {
+  $("app").classList.toggle("menu-hidden", hidden);
+  const label = hidden ? "Show menu" : "Hide menu";
+  menuBtn.title = label;
+  menuBtn.setAttribute("aria-label", label);
+  menuBtn.setAttribute("aria-pressed", String(hidden));
+  writeJson(MENU_KEY, hidden);
+  map.invalidateSize();
+}
+setMenuHidden(readJson(MENU_KEY, false));
 
 function startTracking(centerOnFix) {
   locateBtn.classList.add("active", "waiting");
