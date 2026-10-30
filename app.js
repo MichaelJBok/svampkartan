@@ -1,6 +1,7 @@
 const STORAGE_KEY = "svampkartan.spots";
 const COLORS_KEY = "svampkartan.colors";
 const HIDDEN_KEY = "svampkartan.hiddenSpecies";
+const FILTER_KEY = "svampkartan.gbifFilter";
 
 const $ = (id) => document.getElementById(id);
 const readJson = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
@@ -40,6 +41,8 @@ function ensureSpecies(id, name) {
 }
 
 // ---------- my spots ----------
+// A spot: {id, lat, lon, speciesId, species, date (first find), amount, notes, visits: [{date, amount, notes}], …}
+const AMOUNTS = ["None", "A few", "Good", "Lots"];
 let spots = readJson(STORAGE_KEY, []);
 // Older spots stored a display name like "Kantarell (Cantharellus cibarius)"; map them to a species id.
 spots.forEach((s) => {
@@ -58,32 +61,47 @@ function addSpots(list) {
   saveSpots();
   cloud?.save(list);
 }
+function updateSpot(spot) {
+  saveSpots();
+  cloud?.save([spot]);
+}
 function removeSpot(id) {
   spots = spots.filter((x) => x.id !== id);
   saveSpots();
   cloud?.remove(id);
 }
 
+// First find plus every logged visit, newest first.
+function spotHistory(s) {
+  const first = s.date || s.amount != null ? [{ date: s.date || "", amount: s.amount, notes: "", first: true }] : [];
+  return [...first, ...(s.visits || [])].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+}
+const lastDate = (s) => spotHistory(s)[0]?.date || "";
+const amountText = (a) => (a == null || a === "" ? "" : AMOUNTS[a]);
+
 function isoDate(d) { return d.toISOString().slice(0, 10); }
 
 // ---------- map ----------
 const map = L.map("map", { preferCanvas: true }).setView([62.5, 16.5], 5);
-const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 18, attribution: "&copy; OpenStreetMap contributors",
+// crossOrigin lets the offline helper (sw.js) keep viewed map tiles compactly.
+const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 18, crossOrigin: true, attribution: "&copy; OpenStreetMap contributors",
 }).addTo(map);
 L.control.layers({
   "Map": osm,
-  "Topo": L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", { maxZoom: 17, attribution: "&copy; OpenTopoMap" }),
-  "Satellite": L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 18, attribution: "&copy; Esri" }),
+  "Topo": L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", { maxZoom: 17, crossOrigin: true, attribution: "&copy; OpenTopoMap" }),
+  "Satellite": L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 18, crossOrigin: true, attribution: "&copy; Esri" }),
 }).addTo(map);
 
-// My spots get their own pane above the GBIF clusters so they are never hidden underneath.
+// My spots get their own pane above the GBIF records so they are never hidden underneath.
 map.createPane("mine").style.zIndex = 650;
 const mineRenderer = L.canvas({ pane: "mine" });
+const gbifRenderer = L.canvas({ padding: 0.3 });
 
 // Same fill color per species; the edge and opacity tell the sources apart.
-const gbifStyle = (id) => ({ radius: 5, fillColor: colorOf(id), fillOpacity: 0.55, color: "#ffffff", weight: 1, opacity: 0.9 });
-const mineStyle = (id) => ({ radius: 8, fillColor: colorOf(id), fillOpacity: 1, color: "#1a1a1a", weight: 3, opacity: 1 });
+// bubblingMouseEvents: false so tapping a dot doesn't also count as tapping the map (which starts a new spot).
+const gbifStyle = (id) => ({ radius: 5, fillColor: colorOf(id), fillOpacity: 0.55, color: "#ffffff", weight: 1, opacity: 0.9, bubblingMouseEvents: false });
+const mineStyle = (id) => ({ radius: 8, fillColor: colorOf(id), fillOpacity: 1, color: "#1a1a1a", weight: 3, opacity: 1, bubblingMouseEvents: false });
 
 function textOn(hex) {
   const n = parseInt(hex.slice(1), 16);
@@ -91,66 +109,107 @@ function textOn(hex) {
   return lum > 0.6 ? "#1a1a1a" : "#ffffff";
 }
 
-// GBIF layers: one cluster group per species so each keeps its color when zoomed out.
-const gbifGroups = new Map();
-for (const s of species.values()) {
-  if (!s.gbif.length) continue;
-  const group = L.markerClusterGroup({
-    chunkedLoading: true, disableClusteringAtZoom: 12, maxClusterRadius: 50, showCoverageOnHover: false,
-    iconCreateFunction: (cluster) => {
-      const n = cluster.getChildCount();
-      const size = n < 10 ? 26 : n < 100 ? 32 : n < 1000 ? 38 : 44;
-      const c = colorOf(s.id);
-      return L.divIcon({
-        className: "",
-        iconSize: [size, size],
-        html: `<div class="cluster" style="width:${size}px;height:${size}px;background:${c}cc;color:${textOn(c)};box-shadow:0 0 0 4px ${c}44">${n}</div>`,
-      });
-    },
-  });
-  group.addLayers(s.gbif.map(([lat, lon, date, gbifId, unc]) => {
-    const m = L.circleMarker([lat, lon], gbifStyle(s.id));
-    m.bindPopup(() => {
-      const el = document.createElement("div");
-      el.innerHTML = `<span class="tag" style="--c:${colorOf(s.id)}"></span><b>${escapeHtml(s.name)}</b>
-        <i>${escapeHtml(s.scientific)}</i><br><span class="src">GBIF record</span> · ${date || "unknown date"}
-        ${unc ? `<br><small>±${Math.round(unc)} m</small>` : ""}
-        <br><a href="https://www.gbif.org/occurrence/${gbifId}" target="_blank" rel="noopener">Open on GBIF</a>`;
-      return el;
-    });
-    return m;
-  }));
-  gbifGroups.set(s.id, group);
+// ---------- GBIF records: filters ----------
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const savedFilter = readJson(FILTER_KEY, {});
+const gbifFilter = {
+  months: new Set(savedFilter.months || [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]),
+  maxUncertainty: savedFilter.maxUncertainty || 0, // metres; 0 = any. Records without a value count as imprecise.
+};
+const filterActive = () => gbifFilter.months.size < 12 || gbifFilter.maxUncertainty > 0;
+function passesFilter(r) {
+  if (gbifFilter.maxUncertainty && !(r[4] != null && r[4] <= gbifFilter.maxUncertainty)) return false;
+  return gbifFilter.months.size === 12 || gbifFilter.months.has(+r[2].slice(5, 7));
 }
+
+// ---------- GBIF records: layer ----------
+// One Supercluster index per species, built on first use and after a filter change. It groups tens of
+// thousands of records in milliseconds, and only the clusters and dots in view are drawn.
+const gbifIndex = new Map(); // id -> Supercluster
+const gbifCounts = new Map(); // id -> records passing the filter
+const gbifLayer = L.layerGroup().addTo(map);
+const gbifPopup = L.popup();
+
+function countFiltered() {
+  for (const s of species.values()) {
+    gbifCounts.set(s.id, filterActive() ? s.gbif.reduce((n, r) => n + passesFilter(r), 0) : s.gbif.length);
+  }
+}
+function indexFor(s) {
+  if (!gbifIndex.has(s.id)) {
+    const points = [];
+    s.gbif.forEach((r, i) => {
+      if (passesFilter(r)) points.push({ type: "Feature", properties: { i }, geometry: { type: "Point", coordinates: [r[1], r[0]] } });
+    });
+    // extent 256 matches Leaflet's tile size, so radius is in screen pixels; points stand alone from zoom 12.
+    gbifIndex.set(s.id, new Supercluster({ radius: 50, extent: 256, maxZoom: 11 }).load(points));
+  }
+  return gbifIndex.get(s.id);
+}
+
+function gbifPopupHtml(s, r) {
+  const [, , date, gbifId, unc] = r;
+  return `<span class="tag" style="--c:${colorOf(s.id)}"></span><b>${escapeHtml(s.name)}</b>
+    <i>${escapeHtml(s.scientific)}</i><br><span class="src">GBIF record</span> · ${date || "unknown date"}
+    <br><small>${unc != null ? `Location within ±${unc.toLocaleString("sv-SE")} m` : "Location precision unknown"}</small>
+    <br><a href="https://www.gbif.org/occurrence/${gbifId}" target="_blank" rel="noopener">Open on GBIF</a>`;
+}
+
+let drawQueued = false;
+function drawGbif() {
+  if (drawQueued) return;
+  drawQueued = true;
+  // Several changes in a row (filter, visibility, colour) redraw once.
+  setTimeout(() => {
+    drawQueued = false;
+    gbifLayer.clearLayers();
+    if (!$("showGbif").checked) return;
+    const b = map.getBounds().pad(0.3);
+    const bbox = [Math.max(-180, b.getWest()), Math.max(-85, b.getSouth()), Math.min(180, b.getEast()), Math.min(85, b.getNorth())];
+    const zoom = Math.round(map.getZoom());
+    for (const s of species.values()) {
+      if (!s.gbif.length || hiddenSpecies.has(s.id)) continue;
+      const index = indexFor(s);
+      const c = colorOf(s.id);
+      for (const f of index.getClusters(bbox, zoom)) {
+        const [lon, lat] = f.geometry.coordinates;
+        if (f.properties.cluster) {
+          const n = f.properties.point_count;
+          const size = n < 10 ? 26 : n < 100 ? 32 : n < 1000 ? 38 : 44;
+          const m = L.marker([lat, lon], {
+            keyboard: false,
+            icon: L.divIcon({
+              className: "",
+              iconSize: [size, size],
+              html: `<div class="cluster" style="width:${size}px;height:${size}px;background:${c}cc;color:${textOn(c)};box-shadow:0 0 0 4px ${c}44">${n}</div>`,
+            }),
+          });
+          m.on("click", () => map.setView([lat, lon], Math.min(index.getClusterExpansionZoom(f.properties.cluster_id), 18)));
+          gbifLayer.addLayer(m);
+        } else {
+          const r = s.gbif[f.properties.i];
+          const m = L.circleMarker([lat, lon], { ...gbifStyle(s.id), renderer: gbifRenderer });
+          // A map-level popup survives the redraw that follows its auto-pan.
+          m.on("click", () => gbifPopup.setLatLng([lat, lon]).setContent(gbifPopupHtml(s, r)).openOn(map));
+          gbifLayer.addLayer(m);
+        }
+      }
+    }
+  }, 0);
+}
+map.on("moveend", drawGbif);
 
 const mineLayer = L.layerGroup().addTo(map);
 const mineMarkers = new Map(); // spot id -> marker
 
-// Cluster icons can only be refreshed while their group is on the map; hidden ones catch up when shown.
-const staleClusters = new Set();
-
 function applyVisibility() {
-  const showGbif = $("showGbif").checked;
-  for (const [id, group] of gbifGroups) {
-    const on = showGbif && !hiddenSpecies.has(id);
-    if (on && !map.hasLayer(group)) {
-      map.addLayer(group);
-      if (staleClusters.delete(id)) group.refreshClusters();
-    }
-    if (!on && map.hasLayer(group)) map.removeLayer(group);
-  }
+  drawGbif();
   $("showMine").checked ? map.addLayer(mineLayer) : map.removeLayer(mineLayer);
   renderSpots();
 }
 
-function recolor(id) {
-  const group = gbifGroups.get(id);
-  if (group) {
-    const style = gbifStyle(id);
-    group.eachLayer((m) => m.setStyle(style));
-    if (map.hasLayer(group)) group.refreshClusters();
-    else staleClusters.add(id);
-  }
+function recolor() {
+  drawGbif();
   renderSpots();
   renderSpeciesList();
 }
@@ -161,6 +220,10 @@ function renderSpeciesList() {
   list.innerHTML = "";
   for (const s of species.values()) {
     const mine = spots.filter((p) => p.speciesId === s.id).length;
+    const shown = gbifCounts.get(s.id) ?? s.gbif.length;
+    const count = filterActive() && s.gbif.length
+      ? `${shown.toLocaleString("sv-SE")}<small>of ${s.gbif.length.toLocaleString("sv-SE")} · ${mine} mine</small>`
+      : `${s.gbif.length.toLocaleString("sv-SE")}<small>${mine} mine</small>`;
     const li = document.createElement("li");
     li.innerHTML = `
       <input type="checkbox" id="vis-${s.id}" ${hiddenSpecies.has(s.id) ? "" : "checked"} aria-label="Show ${escapeHtml(s.name)}">
@@ -168,7 +231,7 @@ function renderSpeciesList() {
         <input type="color" id="col-${s.id}" value="${colorOf(s.id)}" aria-label="Color for ${escapeHtml(s.name)}">
       </label>
       <span class="sname">${escapeHtml(s.name)}${s.scientific ? `<small>${escapeHtml(s.scientific)}</small>` : ""}</span>
-      <span class="counts">${s.gbif.length.toLocaleString("sv-SE")}<small>${mine} mine</small></span>`;
+      <span class="counts">${count}</span>`;
     li.querySelector('input[type="checkbox"]').onchange = (e) => {
       e.target.checked ? hiddenSpecies.delete(s.id) : hiddenSpecies.add(s.id);
       writeJson(HIDDEN_KEY, [...hiddenSpecies]);
@@ -179,6 +242,8 @@ function renderSpeciesList() {
     picker.onchange = (e) => { colors[s.id] = e.target.value; writeJson(COLORS_KEY, colors); cloud?.saveColors(colors); recolor(s.id); };
     list.appendChild(li);
   }
+  const total = [...species.values()].reduce((n, s) => n + (gbifCounts.get(s.id) ?? s.gbif.length), 0);
+  $("gbifCount").textContent = total.toLocaleString("sv-SE");
   renderSpeciesSelect();
 }
 
@@ -190,50 +255,135 @@ function renderSpeciesSelect() {
   if ([...sel.options].some((o) => o.value === current)) sel.value = current;
 }
 
+// ---------- sidebar: GBIF filters ----------
+function renderFilters() {
+  $("monthChips").innerHTML = MONTHS.map((m, i) =>
+    `<button type="button" class="chip" data-month="${i + 1}" aria-pressed="${gbifFilter.months.has(i + 1)}">${m}</button>`).join("");
+  $("precision").value = String(gbifFilter.maxUncertainty);
+}
+function applyFilter() {
+  writeJson(FILTER_KEY, { months: [...gbifFilter.months], maxUncertainty: gbifFilter.maxUncertainty });
+  gbifIndex.clear();
+  countFiltered();
+  renderFilters();
+  renderSpeciesList();
+  drawGbif();
+}
+$("monthChips").onclick = (e) => {
+  const m = +e.target.dataset?.month;
+  if (!m) return;
+  gbifFilter.months.has(m) ? gbifFilter.months.delete(m) : gbifFilter.months.add(m);
+  applyFilter();
+};
+$("monthsNow").onclick = () => {
+  // This month plus whichever neighbouring month is closer to today.
+  const now = new Date();
+  const m = now.getMonth() + 1;
+  const other = now.getDate() <= 15 ? (m === 1 ? 12 : m - 1) : (m === 12 ? 1 : m + 1);
+  gbifFilter.months = new Set([m, other]);
+  applyFilter();
+};
+$("monthsAll").onclick = () => { gbifFilter.months = new Set(MONTHS.map((_, i) => i + 1)); applyFilter(); };
+$("precision").onchange = (e) => { gbifFilter.maxUncertainty = +e.target.value; applyFilter(); };
+
 // ---------- my spots rendering ----------
+// One shared popup for my spots, filled by the app. Re-rendering markers (e.g. when a sync update arrives)
+// never closes it, and the log-visit form inside it is never rebuilt behind your back.
+const spotPopupLayer = L.popup({ minWidth: 220 });
+let openSpotId = null;
+spotPopupLayer.on("remove", () => { openSpotId = null; });
+
+function historyHtml(s) {
+  const h = spotHistory(s);
+  if (!h.length) return "";
+  return `<ul class="visits">${h.map((v) => `<li>${v.date || "date unknown"}${amountText(v.amount) ? ` · <b>${amountText(v.amount)}</b>` : ""}${v.first ? " <small>(first find)</small>" : ""}${v.notes ? ` · ${escapeHtml(v.notes)}` : ""}</li>`).join("")}</ul>`;
+}
+
+function openSpot(id) {
+  const s = spots.find((x) => x.id === id);
+  if (!s) return map.closePopup(spotPopupLayer);
+  openSpotId = id;
+  spotPopupLayer.setLatLng([s.lat, s.lon]).setContent(spotPopup(s));
+  if (!map.hasLayer(spotPopupLayer)) spotPopupLayer.openOn(map);
+}
+
+function spotPopup(s) {
+  const el = document.createElement("div");
+  el.className = "spot-popup";
+  el.innerHTML = `<span class="tag mine" style="--c:${colorOf(s.speciesId)}"></span><b>${escapeHtml(s.species)}</b>
+    <br><span class="src">My record</span>
+    ${s.source ? `<br><small>From ${escapeHtml(s.source)}</small>` : ""}
+    ${s.notes ? `<br>${escapeHtml(s.notes)}` : ""}
+    ${historyHtml(s)}
+    <div class="row actions"><button class="log primary">Log visit</button><button class="edit">Edit</button><button class="del">Delete</button></div>`;
+  // Buttons here replace themselves (e.g. with the visit form); without this Leaflet can't tell the click
+  // came from inside the popup and treats it as a tap on the map.
+  L.DomEvent.disableClickPropagation(el);
+  L.DomEvent.on(el, "click", L.DomEvent.stopPropagation);
+
+  el.querySelector(".log").onclick = () => {
+    el.querySelector(".actions").outerHTML = `<form class="visit-form">
+        <label>Date <input type="date" name="date" value="${isoDate(new Date())}" required></label>
+        <label>Amount <select name="amount">${AMOUNTS.map((a, i) => `<option value="${i}" ${i === 2 ? "selected" : ""}>${a}</option>`).join("")}</select></label>
+        <label>Note <input name="notes" placeholder="Optional"></label>
+        <div class="row"><button type="submit" class="primary">Save visit</button><button type="button" class="cancel">Cancel</button></div>
+      </form>`;
+    const form = el.querySelector(".visit-form");
+    form.querySelector(".cancel").onclick = () => openSpot(s.id);
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      const d = new FormData(form);
+      s.visits = [...(s.visits || []), { date: d.get("date"), amount: +d.get("amount"), notes: String(d.get("notes")).trim() }];
+      updateSpot(s);
+      renderSpots();
+      openSpot(s.id);
+    };
+    spotPopupLayer.update(); // content is a plain element, so this only resizes the popup
+  };
+  el.querySelector(".edit").onclick = () => { map.closePopup(spotPopupLayer); openForm(L.latLng(s.lat, s.lon), s); };
+  // Inline confirmation: dialogs like confirm() are not available everywhere.
+  el.querySelector(".del").onclick = () => {
+    const row = el.querySelector(".actions");
+    row.innerHTML = `<span>Delete this spot and its visits?</span><button class="yes danger">Delete</button><button class="no">Keep</button>`;
+    row.querySelector(".yes").onclick = () => { map.closePopup(spotPopupLayer); removeSpot(s.id); renderSpots(); renderSpeciesList(); };
+    row.querySelector(".no").onclick = () => openSpot(s.id);
+  };
+  return el;
+}
+
 function renderSpots() {
   mineLayer.clearLayers();
   mineMarkers.clear();
   const list = $("spotList");
   list.innerHTML = "";
-  // Newest first; spots without a date (e.g. imported from Google Maps) go last.
-  [...spots].sort((a, b) => (b.date || "").localeCompare(a.date || "")).forEach((s) => {
-    const visible = !hiddenSpecies.has(s.speciesId);
+  // Most recent activity first; spots without any date (e.g. imported from Google Maps) go last.
+  [...spots].sort((a, b) => lastDate(b).localeCompare(lastDate(a))).forEach((s) => {
     const m = L.circleMarker([s.lat, s.lon], { ...mineStyle(s.speciesId), pane: "mine", renderer: mineRenderer });
-    const el = document.createElement("div");
-    el.innerHTML = `<span class="tag mine" style="--c:${colorOf(s.speciesId)}"></span><b>${escapeHtml(s.species)}</b>
-      <br><span class="src">My record</span> · ${s.date || "date unknown"}
-      ${s.source ? `<br><small>From ${escapeHtml(s.source)}</small>` : ""}
-      ${s.notes ? `<br>${escapeHtml(s.notes)}` : ""}
-      <div class="row confirm"><button class="del">Delete</button></div>`;
-    // Inline confirmation: dialogs like confirm() are not available everywhere.
-    el.querySelector(".del").onclick = (e) => {
-      const row = e.target.parentElement;
-      row.innerHTML = `<span>Delete this spot?</span><button class="yes danger">Delete</button><button class="no">Keep</button>`;
-      row.querySelector(".yes").onclick = () => { removeSpot(s.id); renderSpots(); renderSpeciesList(); };
-      row.querySelector(".no").onclick = () => m.closePopup();
-    };
-    m.bindPopup(el);
-    if (visible) mineLayer.addLayer(m);
+    m.on("click", () => openSpot(s.id));
+    if (!hiddenSpecies.has(s.speciesId)) mineLayer.addLayer(m);
     mineMarkers.set(s.id, m);
 
+    const visits = spotHistory(s).length;
     const li = document.createElement("li");
     li.innerHTML = `<span class="tag mine" style="--c:${colorOf(s.speciesId)}"></span>${escapeHtml(s.species)}
-      <br><small>${s.date || "date unknown"}</small>`;
+      <br><small>${lastDate(s) ? `Last ${lastDate(s)}` : "date unknown"}${visits > 1 ? ` · ${visits} visits` : ""}</small>`;
     li.onclick = () => {
       if (hiddenSpecies.has(s.speciesId)) { hiddenSpecies.delete(s.speciesId); writeJson(HIDDEN_KEY, [...hiddenSpecies]); renderSpeciesList(); applyVisibility(); }
       map.setView([s.lat, s.lon], 14);
-      mineMarkers.get(s.id).openPopup();
+      openSpot(s.id);
     };
     list.appendChild(li);
   });
   $("mineCount").textContent = spots.length;
   $("spotsCount").textContent = spots.length;
+  // Refresh an open spot popup with the latest data, unless you're in the middle of logging a visit.
+  if (openSpotId && !spotPopupLayer.getElement()?.querySelector(".visit-form")) openSpot(openSpotId);
 }
 
-$("gbifCount").textContent = [...species.values()].reduce((n, s) => n + s.gbif.length, 0).toLocaleString("sv-SE");
 $("showGbif").onchange = applyVisibility;
 $("showMine").onchange = applyVisibility;
+countFiltered();
+renderFilters();
 renderSpeciesList();
 applyVisibility();
 
@@ -242,9 +392,9 @@ const SPOTS_OPEN_KEY = "svampkartan.spotsOpen";
 $("spotsBox").open = readJson(SPOTS_OPEN_KEY, false);
 $("spotsBox").addEventListener("toggle", () => writeJson(SPOTS_OPEN_KEY, $("spotsBox").open));
 
-// ---------- add-spot form ----------
-let draft = null;
-const draftMarker = L.circleMarker([0, 0], { radius: 9, fillOpacity: 0.3, color: "#1a1a1a", weight: 2, dashArray: "4 3", pane: "mine", renderer: mineRenderer });
+// ---------- add / edit form ----------
+let draft = null; // {lat, lon, editing: spot | null}
+const draftMarker = L.circleMarker([0, 0], { radius: 9, fillOpacity: 0.3, color: "#1a1a1a", weight: 2, dashArray: "4 3", pane: "mine", renderer: mineRenderer, interactive: false });
 
 function updateDraftColor() {
   const id = $("fSpecies").value;
@@ -252,17 +402,35 @@ function updateDraftColor() {
   draftMarker.setStyle({ fillColor: id === "__other" ? "#7f7f7f" : colorOf(id) });
 }
 
-function openForm(latlng) {
-  setMenuHidden(false);
-  draft = { lat: latlng.lat, lon: latlng.lng };
+function setDraftPosition(latlng) {
+  draft.lat = latlng.lat;
+  draft.lon = latlng.lng;
   draftMarker.setLatLng(latlng).addTo(map);
-  $("form").hidden = false;
   $("fPos").value = `${draft.lat.toFixed(5)}, ${draft.lon.toFixed(5)}`;
-  if (!$("fDate").value) $("fDate").value = isoDate(new Date());
-  updateDraftColor();
-  $("fSpecies").focus();
 }
-map.on("click", (e) => openForm(e.latlng));
+
+function openForm(latlng, editing = null) {
+  setMenuHidden(false);
+  draft = { lat: 0, lon: 0, editing };
+  setDraftPosition(latlng);
+  $("form").hidden = false;
+  $("formTitle").textContent = editing ? "Edit spot" : "New spot";
+  $("fSave").textContent = editing ? "Save changes" : "Save spot";
+  $("fMoveHint").hidden = !editing;
+  if (editing) {
+    $("fSpecies").value = species.has(editing.speciesId) ? editing.speciesId : "__other";
+    $("fOther").value = species.has(editing.speciesId) ? "" : editing.species;
+    $("fDate").value = editing.date || "";
+    $("fAmount").value = editing.amount ?? "";
+    $("fNotes").value = editing.notes || "";
+  } else if (!$("fDate").value) {
+    $("fDate").value = isoDate(new Date());
+  }
+  updateDraftColor();
+  $("form").scrollIntoView({ block: "nearest" });
+}
+// Tapping the map starts a new spot, or moves the pin while a spot is being added or edited.
+map.on("click", (e) => (draft ? setDraftPosition(e.latlng) : openForm(e.latlng)));
 
 // ---------- my location ----------
 // Follows the device's GPS while tracking is on; browsers only allow this over HTTPS (or localhost).
@@ -366,6 +534,7 @@ function closeForm() {
   $("form").hidden = true;
   $("fNotes").value = "";
   $("fOther").value = "";
+  $("fAmount").value = "";
 }
 $("fCancel").onclick = closeForm;
 
@@ -373,24 +542,29 @@ $("form").onsubmit = (e) => {
   e.preventDefault();
   if (!draft) return;
   let id = $("fSpecies").value;
-  let name;
   if (id === "__other") {
-    name = $("fOther").value.trim();
+    const name = $("fOther").value.trim();
     if (!name) { $("fOther").focus(); return; }
     const existing = [...species.values()].find((s) => s.name.toLowerCase() === name.toLowerCase());
     id = existing ? existing.id : slug(name);
     ensureSpecies(id, existing ? existing.name : name);
   }
-  name = species.get(id).name;
-  addSpots([{
-    id: crypto.randomUUID(),
+  const fields = {
     lat: +draft.lat.toFixed(6), lon: +draft.lon.toFixed(6),
-    speciesId: id, species: name,
+    speciesId: id, species: species.get(id).name,
     date: $("fDate").value,
+    amount: $("fAmount").value === "" ? null : +$("fAmount").value,
     notes: $("fNotes").value.trim(),
-    created: new Date().toISOString(),
-  }]);
+  };
+  const editing = draft.editing;
+  if (editing) {
+    Object.assign(editing, fields);
+    updateSpot(editing);
+  } else {
+    addSpots([{ id: crypto.randomUUID(), ...fields, created: new Date().toISOString() }]);
+  }
   closeForm(); renderSpeciesList(); $("fSpecies").value = id; renderSpots();
+  if (editing) openSpot(editing.id);
 };
 
 // ---------- export / import ----------
@@ -424,3 +598,11 @@ $("importFile").onchange = async (e) => {
   }
   e.target.value = "";
 };
+
+// ---------- offline ----------
+// sw.js keeps the app, the GBIF data and viewed map tiles on the device so the app opens without signal.
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+function showNetwork() { $("netStatus").hidden = navigator.onLine; }
+window.addEventListener("online", showNetwork);
+window.addEventListener("offline", showNetwork);
+showNetwork();

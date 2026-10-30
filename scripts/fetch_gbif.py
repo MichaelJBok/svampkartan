@@ -27,6 +27,28 @@ FIRST_YEAR, LAST_YEAR = 1800, 2100
 OUT = pathlib.Path(__file__).resolve().parent.parent / "data" / "gbif_species.js"
 
 
+def write_js(result):
+    for sp in result:
+        for r in sp["records"]:
+            if r[4] is not None:
+                r[4] = round(r[4])
+    # Wrapped in JSON.parse('…'): browsers parse a JSON string much faster than the same data as JS code.
+    body = json.dumps(result, separators=(",", ":")).replace("\\", "\\\\").replace("'", "\\'")
+    OUT.write_text(
+        "// GBIF snapshot of Swedish records. Record fields: lat, lon, date, gbifID, uncertainty (m)\n"
+        "window.GBIF_SPECIES = JSON.parse('" + body + "');\n"
+    )
+
+
+def read_js():
+    text = OUT.read_text()
+    start = text.index("=") + 1
+    body = text[start:].strip().rstrip(";")
+    if body.startswith("JSON.parse('"):
+        body = body[len("JSON.parse('"):-len("')")].replace("\\'", "'").replace("\\\\", "\\")
+    return json.loads(body)
+
+
 def search(taxon_key, years, offset=0, limit=PAGE):
     params = urllib.parse.urlencode({
         "taxonKey": taxon_key,
@@ -61,8 +83,7 @@ if unknown:
     sys.exit(f"Unknown species id(s): {', '.join(sorted(unknown))}")
 existing = {}
 if only and OUT.exists():
-    text = OUT.read_text()
-    existing = {s["id"]: s for s in json.loads(text[text.index("=") + 1:].rstrip().rstrip(";"))}
+    existing = {s["id"]: s for s in read_js()}
 
 result = []
 for sid, name, scientific, taxon_key in SPECIES:
@@ -81,7 +102,7 @@ for sid, name, scientific, taxon_key in SPECIES:
                     round(o["decimalLongitude"], 5),
                     (o.get("eventDate") or "")[:10],
                     o["key"],
-                    o.get("coordinateUncertaintyInMeters"),
+                    round(o["coordinateUncertaintyInMeters"]) if o.get("coordinateUncertaintyInMeters") is not None else None,
                 ])
             offset += PAGE
             if page["endOfRecords"]:
@@ -90,8 +111,5 @@ for sid, name, scientific, taxon_key in SPECIES:
     result.append({"id": sid, "name": name, "scientific": scientific, "taxonKey": taxon_key, "records": records})
 
 OUT.parent.mkdir(exist_ok=True)
-OUT.write_text(
-    "// GBIF snapshot of Swedish records. Record fields: lat, lon, date, gbifID, uncertainty (m)\n"
-    "window.GBIF_SPECIES = " + json.dumps(result, separators=(",", ":")) + ";\n"
-)
+write_js(result)
 print(f"Wrote {sum(len(s['records']) for s in result)} records to {OUT}")

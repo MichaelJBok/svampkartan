@@ -12,7 +12,6 @@
 <link rel="manifest" href="site.webmanifest">
 <meta name="theme-color" content="#EFE3D0">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
 <style>
   :root { --bg:#fbfaf7; --fg:#2b2a26; --muted:#77736a; --accent:#2f7d4a; --border:#e3dfd6; }
   * { box-sizing: border-box; }
@@ -72,6 +71,20 @@
   @media (prefers-reduced-motion: reduce) { .locate-btn.waiting svg { animation:none; } }
   #locStatus:empty, #syncStatus:empty { display:none; }
   .leaflet-popup-content .row { margin-top:8px; }
+
+  /* GBIF filters */
+  .months { display:grid; grid-template-columns:repeat(6, 1fr); gap:4px; }
+  .chip { padding:5px 0; font-size:12px; border-radius:999px; color:var(--muted); }
+  .chip[aria-pressed="true"] { background:var(--fg); border-color:var(--fg); color:var(--bg); }
+  .chip:focus-visible, button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  /* Spot popup: visit history and the log-visit form */
+  .visits { list-style:none; padding:0; margin:8px 0 0; border-top:1px solid var(--border); }
+  .visits li { padding:4px 0; border-bottom:1px solid var(--border); font-size:12px; }
+  .visits small { color:var(--muted); }
+  .visit-form label { font-weight:normal; margin:6px 0 0; }
+  .visit-form input, .visit-form select { margin-top:2px; }
+  .net-status { background:#3d2b1f; color:#fff; padding:6px 10px; border-radius:6px; font-size:12px; margin:8px 0 0; }
   .leaflet-popup-content button { padding:4px 10px; }
 
   @media (max-width: 700px) {
@@ -85,6 +98,7 @@
   <aside id="side">
     <h1>Svampkartan</h1>
     <p class="hint">Tap the map to add a spot, or add one where you are standing.</p>
+    <p class="net-status" id="netStatus" hidden>Offline. Showing what's saved on this device; changes sync when you're back online.</p>
     <div class="row">
       <button type="button" class="primary" id="addHereBtn">Add spot at my location</button>
     </div>
@@ -108,10 +122,26 @@
     <p class="hint">Click a color dot to change it.</p>
     <ul id="speciesList"></ul>
 
+    <h2>Filter GBIF records</h2>
+    <label>Months found</label>
+    <div class="months" id="monthChips" role="group" aria-label="Months found"></div>
+    <div class="row">
+      <button type="button" id="monthsNow">This time of year</button>
+      <button type="button" id="monthsAll">All months</button>
+    </div>
+    <label for="precision">Location precision</label>
+    <select id="precision">
+      <option value="0">Any</option>
+      <option value="1000">Within 1 km</option>
+      <option value="250">Within 250 m</option>
+      <option value="100">Within 100 m</option>
+    </select>
+
     <form id="form" hidden>
-      <h2>New spot</h2>
+      <h2 id="formTitle">New spot</h2>
       <label for="fPos">Position</label>
       <input id="fPos" readonly>
+      <p class="hint" id="fMoveHint" hidden>Tap the map to move the pin.</p>
       <label for="fSpecies">Species</label>
       <select id="fSpecies"></select>
       <div id="fOtherWrap" hidden>
@@ -119,9 +149,17 @@
         <input id="fOther" placeholder="e.g. Fårticka">
       </div>
       <label for="fDate">Date found</label>
-      <input id="fDate" type="date" required>
+      <input id="fDate" type="date">
+      <label for="fAmount">Amount</label>
+      <select id="fAmount">
+        <option value="">Not recorded</option>
+        <option value="0">None</option>
+        <option value="1">A few</option>
+        <option value="2">Good</option>
+        <option value="3">Lots</option>
+      </select>
       <label for="fNotes">Notes</label>
-      <textarea id="fNotes" rows="2" placeholder="Amount, habitat…"></textarea>
+      <textarea id="fNotes" rows="2" placeholder="Habitat, landmarks…"></textarea>
       <div class="row">
         <button type="submit" class="primary" id="fSave">Save spot</button>
         <button type="button" id="fCancel">Cancel</button>
@@ -145,12 +183,12 @@
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
-<script src="data/gbif_species.js?v=4"></script>
-<script src="app.js?v=7"></script>
+<script src="https://unpkg.com/supercluster@8.0.1/dist/supercluster.min.js"></script>
+<script src="data/gbif_species.js?v=5"></script>
+<script src="app.js?v=8"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="sync.js?v=7"></script>
+<script src="sync.js?v=8"></script>
 </body>
 </html>
