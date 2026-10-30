@@ -122,14 +122,15 @@
     <p class="hint">Click a color dot to change it.</p>
     <ul id="speciesList"></ul>
 
-    <h2>Filter GBIF records</h2>
+    <h2>Filter records</h2>
     <label>Months found</label>
+    <p class="hint">Applies to GBIF records and your spots. Your spots without a date are hidden while filtering by month.</p>
     <div class="months" id="monthChips" role="group" aria-label="Months found"></div>
     <div class="row">
       <button type="button" id="monthsNow">This time of year</button>
       <button type="button" id="monthsAll">All months</button>
     </div>
-    <label for="precision">Location precision</label>
+    <label for="precision">GBIF location precision</label>
     <select id="precision">
       <option value="0">Any</option>
       <option value="1000">Within 1 km</option>
@@ -185,7 +186,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/supercluster@8.0.1/dist/supercluster.min.js"></script>
 <script src="data/gbif_species.js?v=5"></script>
-<script src="app.js?v=8"></script>
+<script src="app.js?v=9"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>

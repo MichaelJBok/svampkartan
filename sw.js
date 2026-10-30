@@ -1,7 +1,7 @@
 // Offline support: keeps the app, its libraries, the GBIF data and the map tiles you have viewed on the
 // device, so Svampkartan opens and shows your area without signal. Your spots work offline through Firestore.
 // Bump VERSION whenever a file in SHELL changes, so devices fetch the new set.
-const VERSION = "v8";
+const VERSION = "v9";
 const SHELL_CACHE = `svampkartan-${VERSION}`;
 const TILE_CACHE = "svampkartan-tiles";
 const MAX_TILES = 4000;                    // roughly 60–100 MB of map images
@@ -9,7 +9,7 @@ const TILE_MAX_AGE = 14 * 24 * 3600 * 1000; // refresh viewed tiles every two we
 const PAGE_TIMEOUT = 4000;                 // poor signal: fall back to the saved page after this long
 
 const SHELL = [
-  "./", "app.js?v=8", "sync.js?v=8", "data/gbif_species.js?v=5",
+  "./", "app.js?v=9", "sync.js?v=8", "data/gbif_species.js?v=5",
   "site.webmanifest", "favicon.svg", "favicon.ico", "favicon-32.png", "icon-192.png", "apple-touch-icon.png",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
   "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",

@@ -268,6 +268,7 @@ function applyFilter() {
   renderFilters();
   renderSpeciesList();
   drawGbif();
+  renderSpots();
 }
 $("monthChips").onclick = (e) => {
   const m = +e.target.dataset?.month;
@@ -351,6 +352,12 @@ function spotPopup(s) {
   return el;
 }
 
+// While filtering by month, show a spot only if a find or visit falls in those months; undated spots are hidden.
+function inSelectedMonths(s) {
+  if (gbifFilter.months.size === 12) return true;
+  return spotHistory(s).some((v) => v.date && gbifFilter.months.has(+v.date.slice(5, 7)));
+}
+
 function renderSpots() {
   mineLayer.clearLayers();
   mineMarkers.clear();
@@ -360,7 +367,7 @@ function renderSpots() {
   [...spots].sort((a, b) => lastDate(b).localeCompare(lastDate(a))).forEach((s) => {
     const m = L.circleMarker([s.lat, s.lon], { ...mineStyle(s.speciesId), pane: "mine", renderer: mineRenderer });
     m.on("click", () => openSpot(s.id));
-    if (!hiddenSpecies.has(s.speciesId)) mineLayer.addLayer(m);
+    if (!hiddenSpecies.has(s.speciesId) && inSelectedMonths(s)) mineLayer.addLayer(m);
     mineMarkers.set(s.id, m);
 
     const visits = spotHistory(s).length;
