@@ -126,11 +126,17 @@ for (const s of species.values()) {
 const mineLayer = L.layerGroup().addTo(map);
 const mineMarkers = new Map(); // spot id -> marker
 
+// Cluster icons can only be refreshed while their group is on the map; hidden ones catch up when shown.
+const staleClusters = new Set();
+
 function applyVisibility() {
   const showGbif = $("showGbif").checked;
   for (const [id, group] of gbifGroups) {
     const on = showGbif && !hiddenSpecies.has(id);
-    if (on && !map.hasLayer(group)) map.addLayer(group);
+    if (on && !map.hasLayer(group)) {
+      map.addLayer(group);
+      if (staleClusters.delete(id)) group.refreshClusters();
+    }
     if (!on && map.hasLayer(group)) map.removeLayer(group);
   }
   $("showMine").checked ? map.addLayer(mineLayer) : map.removeLayer(mineLayer);
@@ -142,7 +148,8 @@ function recolor(id) {
   if (group) {
     const style = gbifStyle(id);
     group.eachLayer((m) => m.setStyle(style));
-    group.refreshClusters();
+    if (map.hasLayer(group)) group.refreshClusters();
+    else staleClusters.add(id);
   }
   renderSpots();
   renderSpeciesList();
@@ -169,7 +176,7 @@ function renderSpeciesList() {
     };
     const picker = li.querySelector('input[type="color"]');
     picker.oninput = (e) => { li.querySelector(".swatch").style.setProperty("--c", e.target.value); };
-    picker.onchange = (e) => { colors[s.id] = e.target.value; writeJson(COLORS_KEY, colors); recolor(s.id); };
+    picker.onchange = (e) => { colors[s.id] = e.target.value; writeJson(COLORS_KEY, colors); cloud?.saveColors(colors); recolor(s.id); };
     list.appendChild(li);
   }
   renderSpeciesSelect();
@@ -402,7 +409,7 @@ $("importFile").onchange = async (e) => {
   try {
     const data = JSON.parse(await file.text());
     const incoming = Array.isArray(data) ? data : data.spots || [];
-    if (data.colors) { colors = { ...data.colors, ...colors }; writeJson(COLORS_KEY, colors); }
+    if (data.colors) { colors = { ...data.colors, ...colors }; writeJson(COLORS_KEY, colors); cloud?.saveColors(colors); }
     const known = new Set(spots.map((s) => s.id));
     const added = incoming.filter((s) => s.id && !known.has(s.id) && isFinite(s.lat) && isFinite(s.lon));
     added.forEach((s) => {

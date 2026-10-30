@@ -60,10 +60,10 @@ const UPLOADED_KEY = "svampkartan.uploadedTo"; // accounts this device has alrea
   };
   $("signOutBtn").onclick = () => auth.signOut();
 
-  let unsubscribe = null;
+  let unsubscribers = [];
   auth.onAuthStateChanged((user) => {
-    unsubscribe?.();
-    unsubscribe = null;
+    unsubscribers.forEach((stop) => stop());
+    unsubscribers = [];
     renderAccount(user);
     if (!user) {
       if (cloud) {
@@ -77,9 +77,11 @@ const UPLOADED_KEY = "svampkartan.uploadedTo"; // accounts this device has alrea
     }
 
     const col = db.collection("users").doc(user.uid).collection("spots");
+    const prefs = db.collection("users").doc(user.uid).collection("settings").doc("prefs");
     cloud = {
       save: (list) => { writeAll(col, list).catch(showError); },
       remove: (id) => { col.doc(id).delete().catch(showError); },
+      saveColors: (c) => { prefs.set({ colors: c }, { merge: true }).catch(showError); },
     };
 
     // First sign-in on this device: send up the spots saved here before sync existed.
@@ -96,13 +98,27 @@ const UPLOADED_KEY = "svampkartan.uploadedTo"; // accounts this device has alrea
     }
 
     setStatus("Loading your spots…");
-    unsubscribe = col.onSnapshot({ includeMetadataChanges: true }, (snap) => {
+    unsubscribers.push(col.onSnapshot({ includeMetadataChanges: true }, (snap) => {
       spots = snap.docs.map((d) => d.data());
       spots.forEach((s) => ensureSpecies(s.speciesId, s.species));
       saveSpots(); renderSpeciesList(); renderSpots();
       setStatus(snap.metadata.hasPendingWrites
         ? "Saved on this device. Will sync when you're online."
         : snap.metadata.fromCache ? `Offline · ${spots.length} spots on this device` : `Synced · ${spots.length} spots`);
-    }, showError);
+    }, showError));
+
+    // Species colors follow the account too. The first device to sign in seeds them.
+    unsubscribers.push(prefs.onSnapshot((doc) => {
+      const remote = doc.data()?.colors;
+      if (!remote) {
+        if (Object.keys(colors).length) cloud.saveColors(colors);
+        return;
+      }
+      const changed = [...new Set([...Object.keys(remote), ...Object.keys(colors)])].filter((id) => remote[id] !== colors[id]);
+      if (!changed.length) return;
+      colors = { ...remote };
+      writeJson(COLORS_KEY, colors);
+      changed.forEach((id) => recolor(id));
+    }, showError));
   });
 })();
