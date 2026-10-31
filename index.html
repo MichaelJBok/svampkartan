@@ -64,7 +64,9 @@
   .tag.mine { opacity:1; border:2px solid #1a1a1a; box-shadow:none; }
   .src { color:var(--muted); }
   .cluster { display:flex; align-items:center; justify-content:center; border-radius:50%; font:600 12px/1 -apple-system, system-ui, sans-serif; }
-  .locate-btn, .menu-btn { display:flex !important; align-items:center; justify-content:center; width:34px; height:34px; background:#fff; color:#444; }
+  .locate-btn, .menu-btn, .place-btn { display:flex !important; align-items:center; justify-content:center; width:44px; height:44px; background:#fff; color:#444; }
+  .place-btn.active { background:var(--accent); color:#fff; }
+  #map.placing { cursor:crosshair; }
   .locate-btn.active { color:#1a73e8; }
   .locate-btn.waiting svg { animation:pulse 1s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity:.3; } }
@@ -97,7 +99,7 @@
 <div id="app">
   <aside id="side">
     <h1>Svampkartan</h1>
-    <p class="hint">Tap the map to add a spot, or add one where you are standing.</p>
+    <p class="hint">Press the pin button on the map, then tap where to add a spot, or add one where you are standing.</p>
     <p class="net-status" id="netStatus" hidden>Offline. Showing what's saved on this device; changes sync when you're back online.</p>
     <div class="row">
       <button type="button" class="primary" id="addHereBtn">Add spot at my location</button>
@@ -186,7 +188,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/supercluster@8.0.1/dist/supercluster.min.js"></script>
 <script src="data/gbif_species.js?v=5"></script>
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>

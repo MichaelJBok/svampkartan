@@ -82,7 +82,7 @@ const amountText = (a) => (a == null || a === "" ? "" : AMOUNTS[a]);
 function isoDate(d) { return d.toISOString().slice(0, 10); }
 
 // ---------- map ----------
-const map = L.map("map", { preferCanvas: true }).setView([62.5, 16.5], 5);
+const map = L.map("map", { preferCanvas: true, zoomControl: false }).setView([62.5, 16.5], 5);
 // crossOrigin lets the offline helper (sw.js) keep viewed map tiles compactly.
 const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 18, crossOrigin: true, attribution: "&copy; OpenStreetMap contributors",
@@ -436,8 +436,11 @@ function openForm(latlng, editing = null) {
   updateDraftColor();
   $("form").scrollIntoView({ block: "nearest" });
 }
-// Tapping the map starts a new spot, or moves the pin while a spot is being added or edited.
-map.on("click", (e) => (draft ? setDraftPosition(e.latlng) : openForm(e.latlng)));
+// Tapping the map moves the pin while a spot is being added or edited, or starts a new spot once the add button is on.
+map.on("click", (e) => {
+  if (draft) setDraftPosition(e.latlng);
+  else if (placing) { setPlacing(false); openForm(e.latlng); }
+});
 
 // ---------- my location ----------
 // Follows the device's GPS while tracking is on; browsers only allow this over HTTPS (or localhost).
@@ -454,7 +457,7 @@ const LocateControl = L.Control.extend({
     btn.title = "Show my location";
     btn.setAttribute("role", "button");
     btn.setAttribute("aria-label", "Show my location");
-    btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4" stroke="currentColor" stroke-width="2"/></svg>`;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4" stroke="currentColor" stroke-width="2"/></svg>`;
     L.DomEvent.disableClickPropagation(btn);
     L.DomEvent.on(btn, "click", (e) => { L.DomEvent.preventDefault(e); toggleTracking(); });
     return btn;
@@ -464,7 +467,7 @@ const locateBtn = new LocateControl().addTo(map).getContainer();
 
 // ---------- hide / show the menu ----------
 const MENU_KEY = "svampkartan.menuHidden";
-const MENU_ICON = `<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`;
+const MENU_ICON = `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>`;
 const MenuControl = L.Control.extend({
   options: { position: "topleft" },
   onAdd() {
@@ -489,6 +492,33 @@ function setMenuHidden(hidden) {
   map.invalidateSize();
 }
 setMenuHidden(readJson(MENU_KEY, false));
+
+// ---------- add a spot on the map ----------
+let placing = false; // the next tap on the map starts a new spot
+const PlaceControl = L.Control.extend({
+  options: { position: "topleft" },
+  onAdd() {
+    const btn = L.DomUtil.create("a", "leaflet-bar place-btn");
+    btn.href = "#";
+    btn.setAttribute("role", "button");
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M12 22s7-7.2 7-12.5a7 7 0 0 0-14 0C5 14.8 12 22 12 22z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 6.5v6M9 9.5h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+    L.DomEvent.disableClickPropagation(btn);
+    L.DomEvent.on(btn, "click", (e) => { L.DomEvent.preventDefault(e); setPlacing(!placing); });
+    return btn;
+  },
+});
+const placeBtn = new PlaceControl().addTo(map).getContainer();
+
+function setPlacing(on) {
+  placing = on;
+  placeBtn.classList.toggle("active", on);
+  map.getContainer().classList.toggle("placing", on);
+  const label = on ? "Cancel adding a spot" : "Add a spot on the map";
+  placeBtn.title = label;
+  placeBtn.setAttribute("aria-label", label);
+  placeBtn.setAttribute("aria-pressed", String(on));
+}
+setPlacing(false);
 
 function startTracking(centerOnFix) {
   locateBtn.classList.add("active", "waiting");
