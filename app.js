@@ -87,11 +87,15 @@ const map = L.map("map", { preferCanvas: true, zoomControl: false }).setView([62
 const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 18, crossOrigin: true, attribution: "&copy; OpenStreetMap contributors",
 }).addTo(map);
-L.control.layers({
+const layersControl = L.control.layers({
   "Map": osm,
   "Topo": L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", { maxZoom: 17, crossOrigin: true, attribution: "&copy; OpenTopoMap" }),
   "Satellite": L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 18, crossOrigin: true, attribution: "&copy; Esri" }),
-}).addTo(map);
+}); // added after the other map buttons, so it sits below them
+
+// Inside Adventure Map's mushroom mode the buttons sit where Adventure Map's do: menu and the switch
+// back at top left; location and add-a-spot at top right.
+const EMBEDDED = (() => { try { return window.parent !== window && !!window.parent.setMushroomMode; } catch { return false; } })();
 
 // My spots get their own pane above the GBIF records so they are never hidden underneath.
 map.createPane("mine").style.zIndex = 650;
@@ -450,7 +454,7 @@ const posAccuracy = L.circle([0, 0], { radius: 0, color: "#1a73e8", weight: 1, f
 const posDot = L.circleMarker([0, 0], { radius: 7, fillColor: "#1a73e8", fillOpacity: 1, color: "#ffffff", weight: 3, pane: "mine", renderer: mineRenderer, interactive: false });
 
 const LocateControl = L.Control.extend({
-  options: { position: "topleft" },
+  options: { position: EMBEDDED ? "topright" : "topleft" },
   onAdd() {
     const btn = L.DomUtil.create("a", "leaflet-bar locate-btn");
     btn.href = "#";
@@ -481,6 +485,26 @@ const MenuControl = L.Control.extend({
   },
 });
 const menuBtn = new MenuControl().addTo(map).getContainer();
+if (EMBEDDED) document.body.classList.add("embedded");
+
+const BackControl = L.Control.extend({
+  options: { position: "topleft" },
+  onAdd() {
+    const btn = L.DomUtil.create("a", "leaflet-bar back-btn");
+    btn.href = "#";
+    btn.title = "Back to Adventure Map";
+    btn.setAttribute("role", "button");
+    btn.setAttribute("aria-label", "Back to Adventure Map");
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M2 20 9 8l4 6 3-4 6 10z" fill="currentColor"/><circle cx="17" cy="5" r="2" fill="currentColor"/></svg>`;
+    L.DomEvent.disableClickPropagation(btn);
+    L.DomEvent.on(btn, "click", (e) => { L.DomEvent.preventDefault(e); window.parent.setMushroomMode(false); });
+    return btn;
+  },
+});
+if (EMBEDDED) {
+  new BackControl().addTo(map);
+  window.parent.mushroomBackShown?.(); // Adventure Map can drop its own fallback button
+}
 
 function setMenuHidden(hidden) {
   $("app").classList.toggle("menu-hidden", hidden);
@@ -496,7 +520,7 @@ setMenuHidden(readJson(MENU_KEY, false));
 // ---------- add a spot on the map ----------
 let placing = false; // the next tap on the map starts a new spot
 const PlaceControl = L.Control.extend({
-  options: { position: "topleft" },
+  options: { position: EMBEDDED ? "topright" : "topleft" },
   onAdd() {
     const btn = L.DomUtil.create("a", "leaflet-bar place-btn");
     btn.href = "#";
@@ -508,6 +532,7 @@ const PlaceControl = L.Control.extend({
   },
 });
 const placeBtn = new PlaceControl().addTo(map).getContainer();
+layersControl.addTo(map);
 
 function setPlacing(on) {
   placing = on;

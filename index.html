@@ -64,8 +64,11 @@
   .tag.mine { opacity:1; border:2px solid #1a1a1a; box-shadow:none; }
   .src { color:var(--muted); }
   .cluster { display:flex; align-items:center; justify-content:center; border-radius:50%; font:600 12px/1 -apple-system, system-ui, sans-serif; }
-  .locate-btn, .menu-btn, .place-btn { display:flex !important; align-items:center; justify-content:center; width:44px; height:44px; background:#fff; color:#444; }
+  .locate-btn, .menu-btn, .place-btn, .back-btn { display:flex !important; align-items:center; justify-content:center; width:44px; height:44px; background:#fff; color:#444; }
   .place-btn.active { background:var(--accent); color:#fff; }
+  /* In Adventure Map's mushroom mode, buttons take Adventure Map's look so the two line up exactly. */
+  .embedded .leaflet-bar { border:0; border-radius:4px; box-shadow:0 0 0 2px rgba(0,0,0,.1); }
+  .embedded .leaflet-control-layers { border:0; box-shadow:0 0 0 2px rgba(0,0,0,.1); }
   #map.placing { cursor:crosshair; }
   .locate-btn.active { color:#1a73e8; }
   .locate-btn.waiting svg { animation:pulse 1s ease-in-out infinite; }
@@ -188,7 +191,7 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/supercluster@8.0.1/dist/supercluster.min.js"></script>
 <script src="data/gbif_species.js?v=5"></script>
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
