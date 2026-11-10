@@ -684,20 +684,100 @@ function niceStep(max) {
   return [1, 2, 5, 10].map((m) => m * p).find((s) => s >= raw) || p;
 }
 
+// ---------- regions: Swedish counties (län) and their landsdel, from data/regions.js ----------
+const REGION_KEY = "svampkartan.timeRegion";
+// Each ring as a flat [x0, y0, x1, y1, …] array with its own bounding box, so most tests stop at the box.
+const ringOf = (pts) => {
+  const xy = new Float64Array(pts.flat());
+  let w = 180, e = -180, s = 90, n = -90;
+  for (let i = 0; i < xy.length; i += 2) { w = Math.min(w, xy[i]); e = Math.max(e, xy[i]); s = Math.min(s, xy[i + 1]); n = Math.max(n, xy[i + 1]); }
+  return { xy, w, s, e, n };
+};
+const counties = (window.SE_REGIONS || []).map((c) => {
+  const polys = c.polys.map((p) => p.map(ringOf));
+  const outer = polys.map((p) => p[0]);
+  return { ...c, polys, bbox: [Math.min(...outer.map((r) => r.w)), Math.min(...outer.map((r) => r.s)), Math.max(...outer.map((r) => r.e)), Math.max(...outer.map((r) => r.n))] };
+});
+function inRing(x, y, r) {
+  if (x < r.w || x > r.e || y < r.s || y > r.n) return false;
+  const p = r.xy, len = p.length;
+  let inside = false;
+  for (let i = 0, j = len - 2; i < len; j = i, i += 2) {
+    const yi = p[i + 1], yj = p[j + 1];
+    if ((yi > y) !== (yj > y) && x < ((p[j] - p[i]) * (y - yi)) / (yj - yi) + p[i]) inside = !inside;
+  }
+  return inside;
+}
+// County code for a point. The boundaries are simplified, so a find just off the coast or on a small
+// island goes to the nearest county within about 10 km; anything further out (e.g. abroad) gets none.
+function countyAt(lat, lon) {
+  for (const c of counties) {
+    const [w, s, e, n] = c.bbox;
+    if (lon < w || lon > e || lat < s || lat > n) continue;
+    for (const poly of c.polys) {
+      if (inRing(lon, lat, poly[0]) && !poly.slice(1).some((hole) => inRing(lon, lat, hole))) return c.code;
+    }
+  }
+  const k = Math.cos((lat * Math.PI) / 180);
+  let best = null, bestD = 0.09 ** 2; // ~10 km, in degrees of latitude
+  for (const c of counties) {
+    const [w, s, e, n] = c.bbox;
+    if (lon < w - 0.2 || lon > e + 0.2 || lat < s - 0.1 || lat > n + 0.1) continue;
+    for (const poly of c.polys) {
+      const p = poly[0].xy;
+      for (let i = 0; i < p.length; i += 2) {
+        const d = (p[i + 1] - lat) ** 2 + ((p[i] - lon) * k) ** 2;
+        if (d < bestD) { bestD = d; best = c.code; }
+      }
+    }
+  }
+  return best;
+}
+const countyCache = new WeakMap(); // GBIF record -> county code, worked out once
+function recordCounty(r) {
+  if (!countyCache.has(r)) countyCache.set(r, countyAt(r[0], r[1]));
+  return countyCache.get(r);
+}
+let timeRegion = readJson(REGION_KEY, "all"); // "all" | "view" | "part:Norrland" | "lan:AB"
+function regionTest() {
+  if (timeRegion === "view") {
+    const b = map.getBounds();
+    return (lat, lon) => b.contains([lat, lon]);
+  }
+  const [kind, value] = timeRegion.split(":");
+  const codes = new Set(kind === "part" ? counties.filter((c) => c.part === value).map((c) => c.code) : kind === "lan" ? [value] : []);
+  if (!codes.size) return null; // all of Sweden, and anything else
+  return (lat, lon, r) => codes.has(r ? recordCounty(r) : countyAt(lat, lon));
+}
+function renderRegionSelect() {
+  const sel = $("timeRegion");
+  const parts = ["Götaland", "Svealand", "Norrland"];
+  sel.innerHTML = `<option value="all">All of Sweden</option><option value="view">Area shown on the map</option>`
+    + `<optgroup label="Landsdel">${parts.map((p) => `<option value="part:${p}">${p}</option>`).join("")}</optgroup>`
+    + `<optgroup label="Län">${counties.map((c) => `<option value="lan:${c.code}">${escapeHtml(c.name)}</option>`).join("")}</optgroup>`;
+  if (![...sel.options].some((o) => o.value === timeRegion)) timeRegion = "all";
+  sel.value = timeRegion;
+}
+
 function timeCounts() {
   const bins = timeGroup === "month" ? 12 : 52;
   const shown = [...species.values()].filter((s) => !hiddenSpecies.has(s.id));
+  const inRegion = regionTest();
   const gbif = new Map(), mine = new Map();
   let gbifVague = 0, mineVague = 0;
   for (const s of shown) {
     if (s.gbif.length) {
       const c = new Array(bins).fill(0);
-      for (const r of s.gbif) { const b = timeBin(r[2]); b < 0 ? gbifVague++ : c[b]++; }
+      for (const r of s.gbif) {
+        if (inRegion && !inRegion(r[0], r[1], r)) continue;
+        const b = timeBin(r[2]); b < 0 ? gbifVague++ : c[b]++;
+      }
       gbif.set(s.id, c);
     }
     const c = new Array(bins).fill(0);
     for (const p of spots) {
       if (p.speciesId !== s.id) continue;
+      if (inRegion && !inRegion(p.lat, p.lon)) continue;
       // The first find and every visit that found something; "None" visits are not finds.
       let placed = false;
       for (const v of spotHistory(p)) {
@@ -770,6 +850,8 @@ function openTimeChart() {
   if (!$("timeDialog").open) $("timeDialog").showModal();
   renderTimeChart();
 }
+renderRegionSelect();
+$("timeRegion").onchange = (e) => { timeRegion = e.target.value; writeJson(REGION_KEY, timeRegion); renderTimeChart(); };
 $("timeBtn").onclick = openTimeChart;
 $("timeClose").onclick = () => $("timeDialog").close();
 // Tapping the dimmed area outside the box closes it.

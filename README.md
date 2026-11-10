@@ -9,5 +9,7 @@ included in this repository. Use **Export JSON** to back them up or move them to
 - `index.html`, `app.js`: the app (Leaflet + OpenStreetMap)
 - `data/gbif_species.js`: one-time GBIF snapshot of Swedish records
 - `scripts/fetch_gbif.py`: regenerates that snapshot
+- `data/regions.js`: Swedish counties (län) for the region picker in Finds by time, simplified from
+  [Natural Earth](https://www.naturalearthdata.com/) admin-1 boundaries (public domain)
 
 Occurrence data: [GBIF.org](https://www.gbif.org/), licensed per dataset (CC0 / CC BY / CC BY-NC).
