@@ -389,6 +389,7 @@ function renderSpots() {
   $("spotsCount").textContent = spots.length;
   // Refresh an open spot popup with the latest data, unless you're in the middle of logging a visit.
   if (openSpotId && !spotPopupLayer.getElement()?.querySelector(".visit-form")) openSpot(openSpotId);
+  renderTimeChart(); // species ticked, colours or spots changed
 }
 
 $("showGbif").onchange = applyVisibility;
@@ -660,6 +661,146 @@ $("importFile").onchange = async (e) => {
   }
   e.target.value = "";
 };
+
+// ---------- finds by time ----------
+// A pop-up with two bar charts on the same time axis: GBIF records and my finds, for the species ticked in
+// the list. Each has its own scale (GBIF counts are thousands, mine are tens), stacked by species colour.
+let timeGroup = "month"; // or "week" (ISO week of the year)
+const isoWeek = (iso) => {
+  const d = new Date(iso + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7)); // Thursday of that week decides the year
+  const week = Math.ceil(((d - Date.UTC(d.getUTCFullYear(), 0, 1)) / 864e5 + 1) / 7);
+  return Math.min(week, 52); // the rare week 53 joins week 52
+};
+// Bin index for a date string, or -1 if the date is too vague for this grouping.
+function timeBin(date) {
+  if (!date || date.length < 7) return -1;
+  if (timeGroup === "month") return +date.slice(5, 7) - 1;
+  return date.length >= 10 ? isoWeek(date.slice(0, 10)) - 1 : -1;
+}
+const compact = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, "") + "k" : String(n));
+function niceStep(max) {
+  const raw = max / 3, p = 10 ** Math.floor(Math.log10(raw || 1));
+  return [1, 2, 5, 10].map((m) => m * p).find((s) => s >= raw) || p;
+}
+
+function timeCounts() {
+  const bins = timeGroup === "month" ? 12 : 52;
+  const shown = [...species.values()].filter((s) => !hiddenSpecies.has(s.id));
+  const gbif = new Map(), mine = new Map();
+  let gbifVague = 0, mineVague = 0;
+  for (const s of shown) {
+    if (s.gbif.length) {
+      const c = new Array(bins).fill(0);
+      for (const r of s.gbif) { const b = timeBin(r[2]); b < 0 ? gbifVague++ : c[b]++; }
+      gbif.set(s.id, c);
+    }
+    const c = new Array(bins).fill(0);
+    for (const p of spots) {
+      if (p.speciesId !== s.id) continue;
+      // The first find and every visit that found something; "None" visits are not finds.
+      let placed = false;
+      for (const v of spotHistory(p)) {
+        if (v.amount === 0) continue;
+        const b = timeBin(v.date);
+        if (b >= 0) { c[b]++; placed = true; }
+      }
+      if (!placed) mineVague++; // spots with no usable date, e.g. imported from Google Maps
+    }
+    if (c.some(Boolean)) mine.set(s.id, c);
+  }
+  return { bins, shown, gbif, mine, gbifVague, mineVague };
+}
+
+function barChartSvg(width, bins, series, style) {
+  const height = 130, top = 14, bottom = 18, left = 34, right = 4;
+  const plotH = height - top - bottom, plotW = width - left - right, slot = plotW / bins;
+  const totals = new Array(bins).fill(0);
+  for (const c of series.values()) c.forEach((n, i) => { totals[i] += n; });
+  const max = Math.max(1, ...totals);
+  const step = niceStep(max), yMax = Math.ceil(max / step) * step;
+  const y = (n) => top + plotH - (n / yMax) * plotH;
+  let out = "";
+  for (let t = 0; t <= yMax; t += step) {
+    out += `<line x1="${left}" x2="${width - right}" y1="${y(t)}" y2="${y(t)}" stroke="var(--border)"/>`
+      + `<text x="${left - 4}" y="${y(t) + 3}" text-anchor="end">${compact(t)}</text>`;
+  }
+  const gap = Math.min(4, slot * 0.2), barW = slot - gap;
+  for (let i = 0; i < bins; i++) {
+    const x = left + i * slot + gap / 2;
+    let base = 0;
+    for (const [id, c] of series) {
+      if (!c[i]) continue;
+      out += `<rect x="${x}" y="${y(base + c[i])}" width="${barW}" height="${y(base) - y(base + c[i])}" fill="${colorOf(id)}" ${style}>`
+        + `<title>${escapeHtml(species.get(id).name)}: ${c[i]}</title></rect>`;
+      base += c[i];
+    }
+    if (timeGroup === "month" && totals[i]) {
+      out += `<text x="${x + barW / 2}" y="${y(totals[i]) - 3}" text-anchor="middle" style="fill:var(--fg)">${compact(totals[i])}</text>`;
+    }
+  }
+  // Time axis: month names, or for weeks the name at the week each month starts in.
+  for (let m = 0; m < 12; m++) {
+    const at = timeGroup === "month" ? m + 0.5 : isoWeek(`2025-${String(m + 1).padStart(2, "0")}-04`) - 0.5;
+    const label = slot * (timeGroup === "month" ? 1 : 4.3) < 26 ? MONTHS[m][0] : MONTHS[m];
+    out += `<text x="${left + at * slot}" y="${height - 4}" text-anchor="middle">${label}</text>`;
+  }
+  return `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img">${out}</svg>`;
+}
+
+function renderTimeChart() {
+  if (!$("timeDialog").open) return;
+  const { bins, shown, gbif, mine, gbifVague, mineVague } = timeCounts();
+  const width = Math.max(260, $("timeChart").clientWidth || 600);
+  const sum = (m) => [...m.values()].reduce((n, c) => n + c.reduce((a, b) => a + b, 0), 0);
+  const vague = (n, what) => (n ? ` · ${n.toLocaleString("sv-SE")} ${what} without ${timeGroup === "month" ? "a month" : "a full date"}` : "");
+  const panel = (title, mk, series, style, total, nVague, what, empty) => `<div class="tc-panel">
+      <h4><span class="mk ${mk}"></span>${title} <small>${total.toLocaleString("sv-SE")} finds${vague(nVague, what)}</small></h4>
+      ${total ? barChartSvg(width, bins, series, style) : `<p class="tc-empty">${empty}</p>`}</div>`;
+  const used = shown.filter((s) => gbif.get(s.id)?.some(Boolean) || mine.has(s.id));
+  $("timeChart").innerHTML = !shown.length
+    ? `<p class="tc-empty">No species are ticked. Tick species in the list to see their finds over the year.</p>`
+    : panel("GBIF records", "gbif", gbif, `fill-opacity="0.6"`, sum(gbif), gbifVague, "records", "No GBIF records for these species.")
+      + panel("My finds", "mine", mine, `stroke="#1a1a1a" stroke-width="1"`, sum(mine), mineVague, "spots",
+        "No dated finds of your own for these species yet. Finds and visits with a date show up here.")
+      + `<div class="tc-legend">${used.map((s) => `<span><i style="--c:${colorOf(s.id)}"></i>${escapeHtml(s.name)}</span>`).join("")}</div>`;
+}
+
+function openTimeChart() {
+  if (!$("timeDialog").open) $("timeDialog").showModal();
+  renderTimeChart();
+}
+$("timeBtn").onclick = openTimeChart;
+$("timeClose").onclick = () => $("timeDialog").close();
+// Tapping the dimmed area outside the box closes it.
+$("timeDialog").addEventListener("click", (e) => { if (e.target === e.currentTarget) e.currentTarget.close(); });
+$("timeDialog").querySelector(".seg").onclick = (e) => {
+  const g = e.target.dataset?.group;
+  if (!g) return;
+  timeGroup = g;
+  e.currentTarget.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.group === g)));
+  renderTimeChart();
+};
+window.addEventListener("resize", renderTimeChart);
+
+const TimeControl = L.Control.extend({
+  options: { position: EMBEDDED ? "topright" : "topleft" },
+  onAdd() {
+    const btn = L.DomUtil.create("a", "leaflet-bar chart-btn");
+    btn.href = "#";
+    btn.title = "Finds by time";
+    btn.setAttribute("role", "button");
+    btn.setAttribute("aria-label", "Finds by time");
+    btn.innerHTML = `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M4 20h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M6 17v-5M10 17V7M14 17v-7M18 17V4" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>`;
+    L.DomEvent.disableClickPropagation(btn);
+    L.DomEvent.on(btn, "click", (e) => { L.DomEvent.preventDefault(e); openTimeChart(); });
+    return btn;
+  },
+});
+// Sits below the other map buttons, above the layer switcher.
+map.removeControl(layersControl);
+new TimeControl().addTo(map);
+layersControl.addTo(map);
 
 // ---------- offline ----------
 // sw.js keeps the app, the GBIF data and viewed map tiles on the device so the app opens without signal.
